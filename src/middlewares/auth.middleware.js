@@ -4,6 +4,7 @@ import { db } from "../db/index.js";
 import { permissionTable, rolePermissionTable, usersTable } from "../db/schema.js";
 import { eq,and } from "drizzle-orm";
 
+//authenticate=>
 export const authenticate = async(req, res, next) => {
     try {
         const token = req.cookies.accessToken;
@@ -50,6 +51,7 @@ export const authenticate = async(req, res, next) => {
     }
 }
 
+//user is admin or normal user =>
 export const authorize = (...allowedRoles) => {
 
     return (req, res, next) => {
@@ -70,6 +72,7 @@ export const authorize = (...allowedRoles) => {
     }
 }
 
+//for permission => 
 export const authorizePermission = (requiredPermission) => {
     return async(req,res,next) => {
         try {
