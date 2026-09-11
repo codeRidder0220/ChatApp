@@ -10,6 +10,7 @@ export const usersTable = pgTable("users", {
     password: varchar("password", { length: 255 }),
     createdAt: timestamp("created_at").defaultNow().notNull(),
     updatedAt: timestamp("updated_at").defaultNow().notNull(),
+    role: varchar("role",{length:30}).default("user").notNull()
 });
 
 //schema for sessions =>

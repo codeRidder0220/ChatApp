@@ -162,7 +162,7 @@ export const login = async (req, res, next) => {
 //Refresh Endpoint =>
 export const refresh = async (req, res, next) => {
     try {
-        const refreshToken = req.cookie.refreshToken;
+        const refreshToken = req.cookies.refreshToken;
 
         if (!refreshToken) {
             return res.status(401).json({
@@ -234,6 +234,9 @@ export const refresh = async (req, res, next) => {
 
 
     } catch (error) {
+
+            console.error("REFRESH ERROR:", error);
+
         return res.status(401).json({
             success: false,
             message: "Invalid or expired refresh token"
