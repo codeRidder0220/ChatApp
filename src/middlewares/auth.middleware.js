@@ -1,8 +1,8 @@
 import jwt from "jsonwebtoken";
 import { env } from "../config/env.js";
 import { db } from "../db/index.js";
-import { usersTable } from "../db/schema.js";
-import { eq } from "drizzle-orm";
+import { permissionTable, rolePermissionTable, usersTable } from "../db/schema.js";
+import { eq,and } from "drizzle-orm";
 
 export const authenticate = async(req, res, next) => {
     try {
@@ -22,7 +22,7 @@ export const authenticate = async(req, res, next) => {
         const [user] = await db
             .select({
                 id:usersTable.id,
-                role:usersTable.role
+                roleId:usersTable.roleId
             })
             .from(usersTable)
             .where(eq(usersTable.id , decode.userId));
@@ -36,7 +36,7 @@ export const authenticate = async(req, res, next) => {
 
         req.user = {
             id:user.id,
-            role:user.role
+            roleId:user.roleId
         }
 
         next();
@@ -67,5 +67,36 @@ export const authorize = (...allowedRoles) => {
             });
         }
         next();
+    }
+}
+
+export const authorizePermission = (requiredPermission) => {
+    return async(req,res,next) => {
+        try {
+
+            const [permission] = await db
+                .select({id:permissionTable.id})
+                .from(rolePermissionTable)
+                .innerJoin(
+                    permissionTable , 
+                    eq(rolePermissionTable.permissionId , permissionTable.id)
+                )
+                .where(and(
+                    eq(rolePermissionTable.roleId,req.user.roleId),
+                    eq(permissionTable.name , requiredPermission)
+                ));
+
+                if(!permission){
+                    return res.status(403).json({
+                        success:false,
+                        message:"You do not have permission to perform this action"
+                    });
+                }
+
+                next();
+
+        } catch (error) {
+            next(error);
+        }
     }
 }

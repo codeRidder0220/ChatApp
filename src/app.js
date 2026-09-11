@@ -3,7 +3,7 @@ import cors from "cors";
 import cookieParser from "cookie-parser";
 import { errorMiddeleware } from "./middlewares/error.middlewares.js";
 import authRoutes from "./routes/auth.routes.js"
-import { authenticate , authorize } from "./middlewares/auth.middleware.js";
+import { authenticate , authorize, authorizePermission } from "./middlewares/auth.middleware.js";
 
 
 const app = express();
@@ -25,19 +25,6 @@ app.get("/api/health", (req,res)=>{
 });
 
 app.use("/api/auth" , authRoutes)
-
-app.get(
-    "/api/admin-test",
-    authenticate,
-    authorize("admin"),
-    (req, res) => {
-        res.json({
-            success: true,
-            message: "Welcome Admin"
-        });
-    }
-);
-
 
 app.use(errorMiddeleware);
 
