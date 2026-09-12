@@ -2,7 +2,7 @@ import bcrypt from "bcrypt";
 import { eq } from "drizzle-orm";
 import jwt from "jsonwebtoken";
 import { db } from "../db/index.js"
-import { emailVerificationTokenTable, passwordResetTokenTable, sessionTable, usersTable } from "../db/schema.js";
+import { emailVerificationTokenTable, passwordResetTokenTable, roleTable, sessionTable, usersTable } from "../db/schema.js";
 import { generateAccessToken, generateRandomToken, generateRefreshToken, hashToken } from "../utils/token.js"
 import { env } from "../config/env.js";
 import { sendVerificationEmail, sendResetPasswordEmail } from "../utils/email.js";
@@ -37,13 +37,19 @@ export const register = async (req, res, next) => {
         //password hashing =>
         const hashedPassword = await bcrypt.hash(password, 12);
 
+        const [userRole] = await db
+            .select({id:roleTable.id})
+            .from(roleTable)
+            .where(eq(roleTable.name , "user"));
+
         //insertion in postgresSQL => 
         const [user] = await db
             .insert(usersTable)
             .values({
                 name,
                 email,
-                password: hashedPassword
+                password: hashedPassword,
+                roleId: userRole.id
             }).returning({
                 id: usersTable.id,
                 name: usersTable.name,
