@@ -3,66 +3,110 @@ import { env } from "./config/env.js";
 import jwt from "jsonwebtoken";
 import http from "node:http";
 import { WebSocketServer } from 'ws'
+import { db } from "./db/index.js";
+import { messageTable } from "./db/schema.js"
 
 const server = http.createServer(app);  //make http server where express app run in it
 
 const wss = new WebSocketServer({ server });   //made websocket server and attach with http server
 
-const clients = new Set(); //jitne bhi users connect krege (unka set bnta jayega)
+const clients = new Map(); //jitne bhi users connect krege (unka set bnta jayega)
 
 
 //now on the connection of wss server =>
-wss.on("connection", (socket , request) => {
+wss.on("connection", (socket, request) => {
     console.log("websocket client connected");
 
     const cookies = request.headers.cookie;
-    console.log("cookies:" , cookies);
+    console.log("cookies:", cookies);
 
-    if(!cookies){
+    if (!cookies) {
         socket.close();
         return;
     }
 
-    const accessToken = cookies.split("; ").find((cookie)=>cookie.startsWith("accessToken="))?.split("=")[1];
+    const accessToken = cookies.split("; ").find((cookie) => cookie.startsWith("accessToken="))?.split("=")[1];
 
-    if(!accessToken){
+    if (!accessToken) {
         socket.close();
         return;
     }
     let decoded;
 
-    try{
+    try {
         decoded = jwt.verify(
             accessToken,
             env.ACCESS_TOKEN_SECRET
         );
-    }catch(error){
+    } catch (error) {
         socket.close();
         return;
     }
 
     socket.userId = decoded.userId;
 
+    clients.set(socket.userId, socket);
+
     console.log(`user ${socket.userId} connected`);
-    
 
-
-    clients.add(socket);
 
     //client se msg recieve krna...
-    socket.on("message", (message) => {
-        console.log("recieved", message.toString());
+    socket.on("message", async (message) => {
 
-        //hr connected clients ko check krta hai
-        for(const client of clients){
-            if(client !== socket && client.readyState === 1){   //jisne msg bheja hai usi ko wapas mt bhejo && sirf connected clients ko msg bhejna hai 
-                client.send(message.toString());
+        try {
+            const data = JSON.parse(message.toString());
+
+            const { chatId, receiverId, content } = data;
+
+            if (!chatId || !receiverId || !content) {
+                socket.send(
+                    JSON.stringify({
+                        type: "error",
+                        message: "chatId , receivedID and content are required"
+                    })
+                );
+                return;
             }
+
+            //save msg in db=>
+            const [newMessage] = await db
+                .insert(messageTable)
+                .values({
+                    chatId,
+                    senderId: socket.userId,
+                    type: "text",
+                    content: content.trim()
+                }).returning();
+
+            //find receiver's websocket =>
+            const receiverSocket = clients.get(receiverId);
+
+            //send msg to receiver =>
+            if (receiverSocket && receiverSocket.readyState === 1) {
+                receiverSocket.send(
+                    JSON.stringify({
+                        type: "new_message",
+                        message: newMessage
+                    })
+                )
+            }
+
+        } catch (error) {
+            console.error("WebSocket message error:", error);
+
+            socket.send(
+            JSON.stringify({
+                type: "error",
+                message: "Invalid message"
+            })
+        );
         }
+
     });
-    
+
+
     socket.on("close", () => {
-        clients.delete(socket);  //jb user ka connection set se remove hojaye
+        clients.delete(socket.userId);  //jb user ka connection set se remove hojaye
 
         console.log(`user ${socket.userId} disconnected`);
     });
