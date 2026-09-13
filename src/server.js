@@ -1,9 +1,7 @@
 import app from "./app.js"
 import { env } from "./config/env.js";
 import jwt from "jsonwebtoken";
-
-import http, { request } from "node:http";
-import { decode } from "node:punycode";
+import http from "node:http";
 import { WebSocketServer } from 'ws'
 
 const server = http.createServer(app);  //make http server where express app run in it
