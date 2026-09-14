@@ -6,7 +6,8 @@ import { WebSocketServer } from 'ws'
 import { db } from "./db/index.js";
 import { messageTable, chatMemberTable, messageReciptsTable } from "./db/schema.js"
 import { and, eq } from "drizzle-orm"
-import { type } from "node:os";
+
+
 
 
 const server = http.createServer(app);  //make http server where express app run in it
@@ -55,67 +56,210 @@ wss.on("connection", (socket, request) => {
 
     //client se msg recieve krna...
     socket.on("message", async (message) => {
-
         try {
             const data = JSON.parse(message.toString());
 
-            const { chatId, receiverId, content } = data;
+            // TYPING INDICATOR
 
-            if (!chatId || !receiverId || !content) {
-                socket.send(
-                    JSON.stringify({
-                        type: "error",
-                        message: "chatId , receivedID and content are required"
+            if (
+                data.type === "typing_start" ||
+                data.type === "typing_stop"
+            ) {
+                const receiverId = Number(data.receiverId);
+                const chatId = Number(data.chatId);
+
+                if (!receiverId || !chatId) {
+                    return;
+                }
+
+                const [senderMembership] = await db
+                    .select({
+                        id: chatMemberTable.id
                     })
-                );
+                    .from(chatMemberTable)
+                    .where(
+                        and(
+                            eq(chatMemberTable.chatId, chatId),
+                            eq(chatMemberTable.userId, socket.userId)
+                        )
+                    );
+
+                if (!senderMembership) {
+                    return;
+                }
+
+                const receiverSocket = clients.get(receiverId);
+
+                if (
+                    receiverSocket &&
+                    receiverSocket.readyState === 1
+                ) {
+                    receiverSocket.send(
+                        JSON.stringify({
+                            type: data.type,
+                            chatId,
+                            userId: socket.userId
+                        })
+                    );
+                }
+
                 return;
             }
 
-            //check sender is a member of this chat..
+
+            // MESSAGE READ
+
+            if (data.type === "message_read") {
+                const messageId = Number(data.messageId);
+
+                if (!messageId) {
+                    return;
+                }
+
+                const [messageData] = await db
+                    .select({
+                        senderId: messageTable.senderId
+                    })
+                    .from(messageTable)
+                    .where(
+                        eq(messageTable.id, messageId)
+                    );
+
+                if (!messageData) {
+                    return;
+                }
+
+                await db
+                    .update(messageReciptsTable)
+                    .set({
+                        status: "read",
+                        readAt: new Date()
+                    })
+                    .where(
+                        and(
+                            eq(
+                                messageReciptsTable.messageId,
+                                messageId
+                            ),
+                            eq(
+                                messageReciptsTable.userId,
+                                socket.userId
+                            )
+                        )
+                    );
+
+                const senderSocket = clients.get(
+                    messageData.senderId
+                );
+
+                if (
+                    senderSocket &&
+                    senderSocket.readyState === 1
+                ) {
+                    senderSocket.send(
+                        JSON.stringify({
+                            type: "message_read",
+                            messageId
+                        })
+                    );
+                }
+
+                return;
+            }
+
+
+            // NORMAL MESSAGE
+            const {
+                chatId,
+                receiverId,
+                content
+            } = data;
+
+            if (
+                !chatId ||
+                !receiverId ||
+                !content?.trim()
+            ) {
+                socket.send(
+                    JSON.stringify({
+                        type: "error",
+                        message:
+                            "chatId, receiverId and content are required"
+                    })
+                );
+
+                return;
+            }
+
+
+            // Check sender membership
+
             const [membership] = await db
                 .select({
                     id: chatMemberTable.id
                 })
                 .from(chatMemberTable)
-                .where(and(
-                    eq(chatMemberTable.chatId, Number(chatId)),
-                    eq(chatMemberTable.userId, socket.userId)
-                ));
+                .where(
+                    and(
+                        eq(
+                            chatMemberTable.chatId,
+                            Number(chatId)
+                        ),
+                        eq(
+                            chatMemberTable.userId,
+                            socket.userId
+                        )
+                    )
+                );
 
             if (!membership) {
                 socket.send(
                     JSON.stringify({
                         type: "error",
-                        message: "You are not a member of this chat"
+                        message:
+                            "You are not a member of this chat"
                     })
                 );
+
                 return;
             }
 
-            //check receiver is a member of this chat..
+
+            // Check receiver membership
+
             const [receiverMembership] = await db
                 .select({
                     id: chatMemberTable.id
                 })
                 .from(chatMemberTable)
-                .where(and(
-                    eq(chatMemberTable.chatId, Number(chatId)),
-                    eq(chatMemberTable.userId, Number(receiverId))
-                ));
+                .where(
+                    and(
+                        eq(
+                            chatMemberTable.chatId,
+                            Number(chatId)
+                        ),
+                        eq(
+                            chatMemberTable.userId,
+                            Number(receiverId)
+                        )
+                    )
+                );
 
             if (!receiverMembership) {
                 socket.send(
                     JSON.stringify({
                         type: "error",
-                        message: "Receiver is not a member of this chat"
+                        message:
+                            "Receiver is not a member of this chat"
                     })
                 );
+
                 return;
             }
 
 
+            // Save message
 
-            //save msg in db=>
             const [newMessage] = await db
                 .insert(messageTable)
                 .values({
@@ -123,23 +267,35 @@ wss.on("connection", (socket, request) => {
                     senderId: socket.userId,
                     type: "text",
                     content: content.trim()
-                }).returning();
+                })
+                .returning();
 
 
-            //status receipt=>
+            // Create receipt
+
             const [receipt] = await db
                 .insert(messageReciptsTable)
                 .values({
                     messageId: newMessage.id,
                     userId: Number(receiverId),
                     status: "sent"
-                }).returning()
+                })
+                .returning();
 
-            //find receiver's websocket =>
-            const receiverSocket = clients.get(Number(receiverId));
 
-            //send msg to receiver =>
-            if (receiverSocket && receiverSocket.readyState === 1) {
+            // Find receiver
+
+            const receiverSocket = clients.get(
+                Number(receiverId)
+            );
+
+
+            // Send message
+
+            if (
+                receiverSocket &&
+                receiverSocket.readyState === 1
+            ) {
                 receiverSocket.send(
                     JSON.stringify({
                         type: "new_message",
@@ -147,60 +303,28 @@ wss.on("connection", (socket, request) => {
                     })
                 );
 
-                //update receipt to delivered =>
+
+                // Delivered
+
                 await db
                     .update(messageReciptsTable)
                     .set({
                         status: "delivered",
                         deliveredAt: new Date()
                     })
-                    .where(eq(messageReciptsTable.id, receipt.id))
-            }
-
-            //update receipt to read
-            if(data.type === "message_read"){
-                const messageId = Number(data.messageId);
-
-                if(!messageId){
-                    return;
-                }
-                const [message] = await db
-                    .select({
-                        senderId: messageTable.senderId
-                    })
-                    .from(messageTable)
-                    .where(eq(messageTable.id , messageId));
-
-                    if(!message){
-                        return;
-                    }
-
-                await db 
-                    .update(messageReciptsTable)
-                    .set({
-                        status:"read",
-                        readAt: new Date()
-                    })
-                    .where(and(
-                        eq(messageReciptsTable.messageId , messageId),
-                        eq(messageReciptsTable.userId , socket.userId)
-                    ))
-                
-                const senderSocket = clients.get(message.senderId);
-
-                if(senderSocket && senderSocket.readyState === 1){
-                    senderSocket.send(
-                        JSON.stringify({
-                            type: "message_read",
-                            messageId
-                        })
-                    )
-                }
-                return;
+                    .where(
+                        eq(
+                            messageReciptsTable.id,
+                            receipt.id
+                        )
+                    );
             }
 
         } catch (error) {
-            console.error("WebSocket message error:", error);
+            console.error(
+                "WebSocket message error:",
+                error
+            );
 
             socket.send(
                 JSON.stringify({
@@ -209,7 +333,6 @@ wss.on("connection", (socket, request) => {
                 })
             );
         }
-
     });
 
 
