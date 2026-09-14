@@ -146,7 +146,7 @@ export const messageReciptsTable = pgTable("message_receipts", {
     readAt: timestamp("read_at"),
 })
 
-//messageReaction table => 
+//message Reaction table => 
 export const messageReactionTable = pgTable("message_reaction", {
     id: serial("id").primaryKey(),
     messageId: integer("message_id").notNull().references(() => usersTable.id, { onDelete: "cascade" }),
