@@ -132,11 +132,12 @@ wss.on("connection", (socket, request) => {
 
                 const [messageData] = await db
                     .select({
-                        senderId: messageTable.senderId
+                        senderId: messageTable.senderId,
+                        chatId: messageTable.chatId
                     })
                     .from(messageTable)
                     .where(
-                        eq(messageTable.id, messageId)
+                        eq(messageTable.id, Number(data.messageId))
                     );
 
                 if (!messageData) {
@@ -161,6 +162,18 @@ wss.on("connection", (socket, request) => {
                             )
                         )
                     );
+                    
+                await db
+                    .update(chatMemberTable)
+                    .set({
+                        lastReadMessageId: Number(data.messageId),
+                        lastReadAt: new Date()
+                    })
+                    .where(and(
+                        eq(chatMemberTable.chatId , messageData.chatId),
+                        eq(chatMemberTable.userId , socket.userId)
+                    ))
+
 
                 const senderSocket = clients.get(
                     messageData.senderId
