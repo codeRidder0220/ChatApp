@@ -3,6 +3,7 @@ import cors from "cors";
 import cookieParser from "cookie-parser";
 import { errorMiddeleware } from "./middlewares/error.middlewares.js";
 import authRoutes from "./routes/auth.routes.js"
+import chatRoutes from "./routes/chat.routes.js"
 import { authenticate , authorize, authorizePermission } from "./middlewares/auth.middleware.js";
 
 
@@ -24,7 +25,8 @@ app.get("/api/health", (req,res)=>{
     });
 });
 
-app.use("/api/auth" , authRoutes)
+app.use("/api/auth" , authRoutes);
+app.use("/api/chats", chatRoutes);
 
 app.use(errorMiddeleware);
 
