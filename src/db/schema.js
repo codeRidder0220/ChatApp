@@ -22,7 +22,8 @@ export const usersTable = pgTable("users", {
     password: varchar("password", { length: 255 }),
     createdAt: timestamp("created_at").defaultNow().notNull(),
     updatedAt: timestamp("updated_at").defaultNow().notNull(),
-    roleId: integer("role_id").references(() => roleTable.id)
+    roleId: integer("role_id").references(() => roleTable.id),
+    lastSeen: timestamp("last_seen")
 });
 
 //schema for role_permission (junction table) =>

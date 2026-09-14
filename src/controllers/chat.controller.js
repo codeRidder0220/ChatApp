@@ -1,8 +1,9 @@
 import { eq ,  and , asc } from "drizzle-orm";
 import { db } from "../db/index.js";
 import { chatTable , chatMemberTable , usersTable , messageTable } from "../db/schema.js";
+import { Client } from "pg";
 
-
+// create private chats..
 export const createPrivateChat = async(req,res,next)=>{
     try {
         const currentUserId = req.user.id;
@@ -88,7 +89,7 @@ export const createPrivateChat = async(req,res,next)=>{
     }
 };
 
-//message history..
+// message history..
 export const getChatMessage = async (req,res,next) => {
     try {
         const currentUserId = req.user.id;
@@ -134,5 +135,22 @@ export const getChatMessage = async (req,res,next) => {
 
     } catch (error) {
         next(error);
+    }
+}
+
+//online user endpoint..
+export const getOnlineStatus = async (req,res,next) =>{
+    try {
+        const userId = Number(req.params.userId);
+
+        const isOnline = Client.has(userId);
+
+        return res.status(200).json({
+            success:true,
+            userId,
+            isOnline
+        });
+    } catch (error) {
+        next(error)
     }
 }

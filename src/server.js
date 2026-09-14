@@ -4,7 +4,7 @@ import jwt from "jsonwebtoken";
 import http from "node:http";
 import { WebSocketServer } from 'ws'
 import { db } from "./db/index.js";
-import { messageTable, chatMemberTable, messageReciptsTable } from "./db/schema.js"
+import { usersTable , messageTable, chatMemberTable, messageReciptsTable } from "./db/schema.js"
 import { and, eq } from "drizzle-orm"
 
 
@@ -53,6 +53,20 @@ wss.on("connection", (socket, request) => {
 
     console.log(`user ${socket.userId} connected`);
 
+    // Notify all connected users
+    for (const [userId, userSocket] of clients) {
+        if (
+            userSocket.readyState === 1 &&
+            userId !== socket.userId
+        ) {
+            userSocket.send(
+                JSON.stringify({
+                    type: "user_online",
+                    userId: socket.userId
+                })
+            );
+        }
+    }
 
     //client se msg recieve krna...
     socket.on("message", async (message) => {
@@ -336,10 +350,33 @@ wss.on("connection", (socket, request) => {
     });
 
 
-    socket.on("close", () => {
-        clients.delete(socket.userId);  //jb user ka connection set se remove hojaye
+    socket.on("close", async() => {
+        clients.delete(socket.userId);
 
-        console.log(`user ${socket.userId} disconnected`);
+        await db
+        .update(usersTable)
+        .set({
+            lastSeen: new Date()
+        })
+        .where(
+            eq(usersTable.id, socket.userId)
+        );
+
+        // Notify remaining users
+        for (const [userId, userSocket] of clients) {
+            if (userSocket.readyState === 1) {
+                userSocket.send(
+                    JSON.stringify({
+                        type: "user_offline",
+                        userId: socket.userId
+                    })
+                );
+            }
+        }
+
+        console.log(
+            `User ${socket.userId} disconnected`
+        );
     });
 });
 
