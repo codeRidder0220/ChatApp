@@ -25,7 +25,7 @@ wss.on("connection", (socket, request) => {
     console.log("cookies:", cookies);
 
     if (!cookies) {
-        socket.close();
+        socket.close();   //Cookie hi nahi hai ,, user authenticate nahi hua ,,connection close.
         return;
     }
 
@@ -73,7 +73,7 @@ wss.on("connection", (socket, request) => {
         try {
             const data = JSON.parse(message.toString());
 
-            // TYPING INDICATOR
+            // TYPING INDICATOR...
 
             if (
                 data.type === "typing_start" ||
