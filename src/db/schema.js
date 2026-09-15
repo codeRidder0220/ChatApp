@@ -150,7 +150,7 @@ export const messageReciptsTable = pgTable("message_receipts", {
 //message Reaction table => 
 export const messageReactionTable = pgTable("message_reaction", {
     id: serial("id").primaryKey(),
-    messageId: integer("message_id").notNull().references(() => usersTable.id, { onDelete: "cascade" }),
+    messageId: integer("message_id").notNull().references(() => messageTable.id, { onDelete: "cascade" }),
     userId: integer("user_id").notNull().references(() => usersTable.id, { onDelete: "cascade" }),
     reaction: varchar("reaction", { length: 20 }).notNull(),
     createdAt: timestamp("created_at").defaultNow().notNull()
