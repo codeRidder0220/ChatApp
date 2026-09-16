@@ -4,7 +4,7 @@ import jwt from "jsonwebtoken";
 import http from "node:http";
 import { WebSocketServer } from 'ws'
 import { db } from "./db/index.js";
-import { usersTable , messageTable, chatMemberTable, messageReciptsTable } from "./db/schema.js"
+import { usersTable, messageTable, chatMemberTable, messageReciptsTable } from "./db/schema.js"
 import { and, eq } from "drizzle-orm"
 
 
@@ -162,7 +162,7 @@ wss.on("connection", (socket, request) => {
                             )
                         )
                     );
-                    
+
                 await db
                     .update(chatMemberTable)
                     .set({
@@ -170,8 +170,8 @@ wss.on("connection", (socket, request) => {
                         lastReadAt: new Date()
                     })
                     .where(and(
-                        eq(chatMemberTable.chatId , messageData.chatId),
-                        eq(chatMemberTable.userId , socket.userId)
+                        eq(chatMemberTable.chatId, messageData.chatId),
+                        eq(chatMemberTable.userId, socket.userId)
                     ))
 
 
@@ -190,6 +190,79 @@ wss.on("connection", (socket, request) => {
                         })
                     );
                 }
+
+                return;
+            }
+
+            //DELETE MSG =>
+
+            if (data.type === "delete_message") {
+                const messageId = Number(data.messageId);
+
+                if (!messageId) {
+                    return;
+                }
+
+                const [messageData] = await db
+                    .select({
+                        id: messageTable.id,
+                        chatId: messageTable.chatId,
+                        senderId: messageTable.senderId
+                    })
+                    .from(messageTable)
+                    .where(
+                        eq(messageTable.id, messageId)
+                    );
+
+                if (!messageData) {
+                    socket.send(JSON.stringify({
+                        type: "error",
+                        message: "Message not found"
+                    }));
+                    return;
+                }
+
+                // Only message owner can delete it
+                if (messageData.senderId !== socket.userId) {
+                    socket.send(JSON.stringify({
+                        type: "error",
+                        message: "You can only delete your own message"
+                    }));
+                    return;
+                }
+
+                await db
+                    .update(messageTable)
+                    .set({
+                        deletedAt: new Date(),
+                        deletedBy: socket.userId,
+                        content: null,
+                        mediaUrl: null
+                    })
+                    .where(
+                        eq(messageTable.id, messageId)
+                    );
+
+                const receiverSocket = clients.get(
+                    data.receiverId
+                );
+
+                if (
+                    receiverSocket &&
+                    receiverSocket.readyState === 1
+                ) {
+                    receiverSocket.send(JSON.stringify({
+                        type: "message_deleted",
+                        messageId,
+                        chatId: messageData.chatId
+                    }));
+                }
+
+                socket.send(JSON.stringify({
+                    type: "message_deleted",
+                    messageId,
+                    chatId: messageData.chatId
+                }));
 
                 return;
             }
@@ -287,23 +360,23 @@ wss.on("connection", (socket, request) => {
             //replyToMessage..
             let replyToMessage = null;
 
-            if(data.replyToMessageId){
+            if (data.replyToMessageId) {
                 const [message] = await db
                     .select({
                         id: messageTable.id,
                         chatId: messageTable.chatId
                     })
                     .from(messageTable)
-                    .where(eq(messageTable.id , Number(data.replyToMessageId)));
+                    .where(eq(messageTable.id, Number(data.replyToMessageId)));
 
-                    if(!message){
-                        return;
-                    }
+                if (!message) {
+                    return;
+                }
 
-                    if(message.chatId !== Number(chatId)){
-                        return;
-                    }
-                    replyToMessage = message;
+                if (message.chatId !== Number(chatId)) {
+                    return;
+                }
+                replyToMessage = message;
             }
 
 
@@ -386,17 +459,17 @@ wss.on("connection", (socket, request) => {
     });
 
 
-    socket.on("close", async() => {
+    socket.on("close", async () => {
         clients.delete(socket.userId);
 
         await db
-        .update(usersTable)
-        .set({
-            lastSeen: new Date()
-        })
-        .where(
-            eq(usersTable.id, socket.userId)
-        );
+            .update(usersTable)
+            .set({
+                lastSeen: new Date()
+            })
+            .where(
+                eq(usersTable.id, socket.userId)
+            );
 
         // Notify remaining users
         for (const [userId, userSocket] of clients) {
