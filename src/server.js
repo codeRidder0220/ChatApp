@@ -4,7 +4,7 @@ import jwt from "jsonwebtoken";
 import http from "node:http";
 import { WebSocketServer } from 'ws'
 import { db } from "./db/index.js";
-import { usersTable, messageTable, chatMemberTable, messageReciptsTable } from "./db/schema.js"
+import { usersTable, messageTable, chatMemberTable, messageReciptsTable, messageReactionTable } from "./db/schema.js"
 import { and, eq } from "drizzle-orm"
 
 
@@ -194,7 +194,7 @@ wss.on("connection", (socket, request) => {
                 return;
             }
 
-            //DELETE MSG =>
+            //DELETE MESSAGE =>
 
             if (data.type === "delete_message") {
                 const messageId = Number(data.messageId);
@@ -262,6 +262,141 @@ wss.on("connection", (socket, request) => {
                     type: "message_deleted",
                     messageId,
                     chatId: messageData.chatId
+                }));
+
+                return;
+            }
+
+            //existing reaction .. then update the reaction or insert the reaction..
+
+            const [existingReaction] = await db
+                .select({
+                    id: messageReactionTable.id
+                })
+                .from(messageReactionTable)
+                .where(
+                    and(
+                        eq(
+                            messageReactionTable.messageId,
+                            messageId
+                        ),
+                        eq(
+                            messageReactionTable.userId,
+                            socket.userId
+                        )
+                    )
+                );
+
+            let reactionData;
+
+            if (existingReaction) {
+                [reactionData] = await db
+                    .update(messageReactionTable)
+                    .set({
+                        reaction
+                    })
+                    .where(
+                        eq(
+                            messageReactionTable.id,
+                            existingReaction.id
+                        )
+                    )
+                    .returning();
+            } else {
+                [reactionData] = await db
+                    .insert(messageReactionTable)
+                    .values({
+                        messageId,
+                        userId: socket.userId,
+                        reaction
+                    })
+                    .returning();
+            }
+
+
+
+
+            // REACTIONS =>
+
+            if (data.type === "add_reaction") {
+                const messageId = Number(data.messageId);
+                const reaction = data.reaction?.trim();
+
+                if (!messageId || !reaction) {
+                    return;
+                }
+
+                const [messageData] = await db
+                    .select({
+                        id: messageTable.id,
+                        chatId: messageTable.chatId
+                    })
+                    .from(messageTable)
+                    .where(
+                        eq(messageTable.id, messageId)
+                    );
+
+                if (!messageData) {
+                    socket.send(JSON.stringify({
+                        type: "error",
+                        message: "Message not found"
+                    }));
+                    return;
+                }
+
+                // Check whether user belongs to this chat
+                const [membership] = await db
+                    .select({
+                        id: chatMemberTable.id
+                    })
+                    .from(chatMemberTable)
+                    .where(
+                        and(
+                            eq(
+                                chatMemberTable.chatId,
+                                messageData.chatId
+                            ),
+                            eq(
+                                chatMemberTable.userId,
+                                socket.userId
+                            )
+                        )
+                    );
+
+                if (!membership) {
+                    socket.send(JSON.stringify({
+                        type: "error",
+                        message: "You are not a member of this chat"
+                    }));
+                    return;
+                }
+
+                const [newReaction] = await db
+                    .insert(messageReactionTable)
+                    .values({
+                        messageId,
+                        userId: socket.userId,
+                        reaction
+                    })
+                    .returning();
+
+                // Notify other members / receiver
+                for (const [userId, userSocket] of clients) {
+                    if (
+                        userId !== socket.userId &&
+                        userSocket.readyState === 1
+                    ) {
+                        userSocket.send(JSON.stringify({
+                            type: "reaction_added",
+                            reaction: newReaction
+                        }));
+                    }
+                }
+
+                // Confirm to sender
+                socket.send(JSON.stringify({
+                    type: "reaction_added",
+                    reaction: newReaction
                 }));
 
                 return;

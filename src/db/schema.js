@@ -1,4 +1,4 @@
-import { text, pgTable, serial, varchar, integer, timestamp, boolean, unique ,index} from "drizzle-orm/pg-core"
+import { text, pgTable, serial, varchar, integer, timestamp, boolean, unique, index } from "drizzle-orm/pg-core"
 
 //schema for role =>
 export const roleTable = pgTable("roles", {
@@ -154,7 +154,14 @@ export const messageReactionTable = pgTable("message_reaction", {
     userId: integer("user_id").notNull().references(() => usersTable.id, { onDelete: "cascade" }),
     reaction: varchar("reaction", { length: 20 }).notNull(),
     createdAt: timestamp("created_at").defaultNow().notNull()
-})
+},
+    (table) => ({
+        uniqueUserMessageReaction: unique(
+            "unique_user_message_reaction"
+        ).on(table.messageId, table.userId)
+    })
+
+)
 
 
 
