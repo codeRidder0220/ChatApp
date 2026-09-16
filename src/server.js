@@ -284,16 +284,39 @@ wss.on("connection", (socket, request) => {
                 return;
             }
 
+            //replyToMessage..
+            let replyToMessage = null;
+
+            if(data.replyToMessageId){
+                const [message] = await db
+                    .select({
+                        id: messageTable.id,
+                        chatId: messageTable.chatId
+                    })
+                    .from(messageTable)
+                    .where(eq(messageTable.id , Number(data.replyToMessageId)));
+
+                    if(!message){
+                        return;
+                    }
+
+                    if(message.chatId !== Number(chatId)){
+                        return;
+                    }
+                    replyToMessage = message;
+            }
+
 
             // Save message
-
             const [newMessage] = await db
                 .insert(messageTable)
                 .values({
                     chatId: Number(chatId),
                     senderId: socket.userId,
                     type: "text",
-                    content: content.trim()
+                    content: content.trim(),
+                    replyToMessageId: replyToMessage ? replyToMessage.id : null
+
                 })
                 .returning();
 
