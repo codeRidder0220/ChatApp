@@ -244,7 +244,7 @@ wss.on("connection", (socket, request) => {
                     );
 
                 const receiverSocket = clients.get(
-                    data.receiverId
+                    Number(data.receiverId)
                 );
 
                 if (
@@ -266,54 +266,6 @@ wss.on("connection", (socket, request) => {
 
                 return;
             }
-
-            //existing reaction .. then update the reaction or insert the reaction..
-
-            const [existingReaction] = await db
-                .select({
-                    id: messageReactionTable.id
-                })
-                .from(messageReactionTable)
-                .where(
-                    and(
-                        eq(
-                            messageReactionTable.messageId,
-                            messageId
-                        ),
-                        eq(
-                            messageReactionTable.userId,
-                            socket.userId
-                        )
-                    )
-                );
-
-            let reactionData;
-
-            if (existingReaction) {
-                [reactionData] = await db
-                    .update(messageReactionTable)
-                    .set({
-                        reaction
-                    })
-                    .where(
-                        eq(
-                            messageReactionTable.id,
-                            existingReaction.id
-                        )
-                    )
-                    .returning();
-            } else {
-                [reactionData] = await db
-                    .insert(messageReactionTable)
-                    .values({
-                        messageId,
-                        userId: socket.userId,
-                        reaction
-                    })
-                    .returning();
-            }
-
-
 
 
             // REACTIONS =>
@@ -344,7 +296,6 @@ wss.on("connection", (socket, request) => {
                     return;
                 }
 
-                // Check whether user belongs to this chat
                 const [membership] = await db
                     .select({
                         id: chatMemberTable.id
@@ -371,16 +322,50 @@ wss.on("connection", (socket, request) => {
                     return;
                 }
 
-                const [newReaction] = await db
-                    .insert(messageReactionTable)
-                    .values({
-                        messageId,
-                        userId: socket.userId,
-                        reaction
+                const [existingReaction] = await db
+                    .select({
+                        id: messageReactionTable.id
                     })
-                    .returning();
+                    .from(messageReactionTable)
+                    .where(
+                        and(
+                            eq(
+                                messageReactionTable.messageId,
+                                messageId
+                            ),
+                            eq(
+                                messageReactionTable.userId,
+                                socket.userId
+                            )
+                        )
+                    );
 
-                // Notify other members / receiver
+                let reactionData;
+
+                if (existingReaction) {
+                    [reactionData] = await db
+                        .update(messageReactionTable)
+                        .set({
+                            reaction
+                        })
+                        .where(
+                            eq(
+                                messageReactionTable.id,
+                                existingReaction.id
+                            )
+                        )
+                        .returning();
+                } else {
+                    [reactionData] = await db
+                        .insert(messageReactionTable)
+                        .values({
+                            messageId,
+                            userId: socket.userId,
+                            reaction
+                        })
+                        .returning();
+                }
+
                 for (const [userId, userSocket] of clients) {
                     if (
                         userId !== socket.userId &&
@@ -388,15 +373,59 @@ wss.on("connection", (socket, request) => {
                     ) {
                         userSocket.send(JSON.stringify({
                             type: "reaction_added",
-                            reaction: newReaction
+                            reaction: reactionData
                         }));
                     }
                 }
 
-                // Confirm to sender
                 socket.send(JSON.stringify({
                     type: "reaction_added",
-                    reaction: newReaction
+                    reaction: reactionData
+                }));
+
+                return;
+            }
+
+            //remove reaction =>
+            if (data.type === "remove_reaction") {
+                const messageId = Number(data.messageId);
+
+                if (!messageId) {
+                    return;
+                }
+
+                await db
+                    .delete(messageReactionTable)
+                    .where(
+                        and(
+                            eq(
+                                messageReactionTable.messageId,
+                                messageId
+                            ),
+                            eq(
+                                messageReactionTable.userId,
+                                socket.userId
+                            )
+                        )
+                    );
+
+                for (const [userId, userSocket] of clients) {
+                    if (
+                        userSocket.readyState === 1 &&
+                        userId !== socket.userId
+                    ) {
+                        userSocket.send(JSON.stringify({
+                            type: "reaction_removed",
+                            messageId,
+                            userId: socket.userId
+                        }));
+                    }
+                }
+
+                socket.send(JSON.stringify({
+                    type: "reaction_removed",
+                    messageId,
+                    userId: socket.userId
                 }));
 
                 return;
