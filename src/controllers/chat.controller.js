@@ -1,6 +1,9 @@
 import { eq, and, asc, gt ,ne , count} from "drizzle-orm";
 import { db } from "../db/index.js";
 import { chatTable, chatMemberTable, usersTable, messageTable } from "../db/schema.js";
+import { redis } from "../config/redis.js";
+
+
 
 // create private chats..
 export const createPrivateChat = async (req, res, next) => {
@@ -197,3 +200,83 @@ export const getUnreadCount = async (req, res, next) => {
 
     }
 }
+
+//get chat by redis(chache)..
+export const getChatById = async (req, res, next) => {
+    try {
+        const currentUserId = req.user.id;
+        const chatId = Number(req.params.chatId);
+
+        if (!chatId) {
+            return res.status(400).json({
+                success: false,
+                message: "Valid chat ID is required"
+            });
+        }
+
+        // 1. Check Redis
+        const cacheKey = `chat:${chatId}`;
+
+        const cachedChat = await redis.get(cacheKey);
+
+        if (cachedChat) {
+            return res.status(200).json({
+                success: true,
+                chat: JSON.parse(cachedChat),
+                source: "redis"
+            });
+        }
+
+        // 2. Check membership
+        const [membership] = await db
+            .select({
+                id: chatMemberTable.id
+            })
+            .from(chatMemberTable)
+            .where(
+                and(
+                    eq(chatMemberTable.chatId, chatId),
+                    eq(chatMemberTable.userId, currentUserId)
+                )
+            );
+
+        if (!membership) {
+            return res.status(403).json({
+                success: false,
+                message: "You are not a member of this chat"
+            });
+        }
+
+        // 3. Get chat from PostgreSQL
+        const [chat] = await db
+            .select()
+            .from(chatTable)
+            .where(
+                eq(chatTable.id, chatId)
+            );
+
+        if (!chat) {
+            return res.status(404).json({
+                success: false,
+                message: "Chat not found"
+            });
+        }
+
+        // 4. Save in Redis for 60 seconds
+        await redis.set(
+            cacheKey,
+            JSON.stringify(chat),
+            "EX",
+            60
+        );
+
+        return res.status(200).json({
+            success: true,
+            chat,
+            source: "postgresql"
+        });
+
+    } catch (error) {
+        next(error);
+    }
+};

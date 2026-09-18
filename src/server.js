@@ -6,7 +6,7 @@ import { WebSocketServer } from 'ws'
 import { db } from "./db/index.js";
 import { usersTable, messageTable, chatMemberTable, messageReciptsTable, messageReactionTable } from "./db/schema.js"
 import { and, eq } from "drizzle-orm"
-
+import { redis, redisPublisher, redisSubscriber } from "./config/redis.js";
 
 
 
@@ -16,9 +16,56 @@ const wss = new WebSocketServer({ server });   //made websocket server and attac
 
 const clients = new Map(); //jitne bhi users connect krege (unka set bnta jayega)
 
+//redis Subscriber =>
+const initializeRedis = async () => {
+    await redisSubscriber.subscribe("chat-message");
+
+    redisSubscriber.on("message", async (channel, message) => {
+        if (channel !== "chat-message") {
+            return;
+        }
+
+        const data = JSON.parse(message);
+
+        const receiverSocket = clients.get(Number(data.receiverId));
+
+        if (
+            receiverSocket &&
+            receiverSocket.readyState === 1
+        ) {
+            receiverSocket.send(
+                JSON.stringify({
+                    type: "new_message",
+                    message: data.message
+                })
+            );
+
+            await db
+                .update(messageReciptsTable)
+                .set({
+                    status: "delivered",
+                    deliveredAt: new Date()
+                })
+                .where(
+                    eq(
+                        messageReciptsTable.id,
+                        data.receiptId
+                    )
+                );
+        }
+
+    })
+};
+initializeRedis();
+
+
+
+
+
+
 
 //now on the connection of wss server =>
-wss.on("connection", (socket, request) => {
+wss.on("connection", async (socket, request) => {
     console.log("websocket client connected");
 
     const cookies = request.headers.cookie;
@@ -51,7 +98,13 @@ wss.on("connection", (socket, request) => {
 
     clients.set(socket.userId, socket);
 
+    await redis.set(
+        `user:${socket.userId}:presence`, "online" //redis me online set ...
+    );
+
     console.log(`user ${socket.userId} connected`);
+
+
 
     // Notify all connected users
     for (const [userId, userSocket] of clients) {
@@ -570,42 +623,18 @@ wss.on("connection", (socket, request) => {
                 .returning();
 
 
-            // Find receiver
+            //Redis publish => 
 
-            const receiverSocket = clients.get(
-                Number(receiverId)
+            await redisPublisher.publish(
+                "chat-message",
+                JSON.stringify({
+                    receiverId: Number(receiverId),
+                    receiptId: receipt.id,
+                    message: newMessage
+                })
             );
 
 
-            // Send message
-
-            if (
-                receiverSocket &&
-                receiverSocket.readyState === 1
-            ) {
-                receiverSocket.send(
-                    JSON.stringify({
-                        type: "new_message",
-                        message: newMessage
-                    })
-                );
-
-
-                // Delivered
-
-                await db
-                    .update(messageReciptsTable)
-                    .set({
-                        status: "delivered",
-                        deliveredAt: new Date()
-                    })
-                    .where(
-                        eq(
-                            messageReciptsTable.id,
-                            receipt.id
-                        )
-                    );
-            }
 
         } catch (error) {
             console.error(
@@ -625,6 +654,8 @@ wss.on("connection", (socket, request) => {
 
     socket.on("close", async () => {
         clients.delete(socket.userId);
+
+        await redis.del(`user:${socket.userId}:presence`)
 
         await db
             .update(usersTable)
