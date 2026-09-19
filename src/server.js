@@ -483,6 +483,96 @@ wss.on("connection", async (socket, request) => {
 
                 return;
             }
+            
+            // FILE MESSAGE
+            if (data.type === "file") {
+                const chatId = Number(data.chatId);
+                const receiverId = Number(data.receiverId);
+
+                if (
+                    !chatId ||
+                    !receiverId ||
+                    !data.mediaUrl
+                ) {
+                    return;
+                }
+
+                // sender membership
+                const [membership] = await db
+                    .select({
+                        id: chatMemberTable.id
+                    })
+                    .from(chatMemberTable)
+                    .where(
+                        and(
+                            eq(chatMemberTable.chatId, chatId),
+                            eq(chatMemberTable.userId, socket.userId)
+                        )
+                    );
+
+                if (!membership) {
+                    socket.send(JSON.stringify({
+                        type: "error",
+                        message: "You are not a member of this chat"
+                    }));
+                    return;
+                }
+
+                // receiver membership
+                const [receiverMembership] = await db
+                    .select({
+                        id: chatMemberTable.id
+                    })
+                    .from(chatMemberTable)
+                    .where(
+                        and(
+                            eq(chatMemberTable.chatId, chatId),
+                            eq(chatMemberTable.userId, receiverId)
+                        )
+                    );
+
+                if (!receiverMembership) {
+                    return;
+                }
+
+                // save file message
+                const [newMessage] = await db
+                    .insert(messageTable)
+                    .values({
+                        chatId,
+                        senderId: socket.userId,
+                        type: "file",
+                        content: null,
+                        mediaUrl: data.mediaUrl,
+                        mediaMimeType: data.mediaMimeType,
+                        mediaSize: data.mediaSize
+                            ? Number(data.mediaSize)
+                            : null
+                    })
+                    .returning();
+
+                // receipt
+                const [receipt] = await db
+                    .insert(messageReciptsTable)
+                    .values({
+                        messageId: newMessage.id,
+                        userId: receiverId,
+                        status: "sent"
+                    })
+                    .returning();
+
+                // Redis Pub/Sub
+                await redisPublisher.publish(
+                    "chat-message",
+                    JSON.stringify({
+                        receiverId,
+                        receiptId: receipt.id,
+                        message: newMessage
+                    })
+                );
+
+                return;
+            }
 
 
             // NORMAL MESSAGE
